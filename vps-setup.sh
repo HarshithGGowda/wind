@@ -38,7 +38,7 @@ sudo apt install -y maven
 # Clone repository (uncomment and modify if using Git)
 echo "Cloning repository..."
 git clone https://github.com/HarshithGGowda/wind.git
-cd peerlink
+cd wind
 
 # Build backend
 echo "Building Java backend..."
