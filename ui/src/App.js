@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import FileUpload from '../components/FileUpload';
-import FileDownload from '../components/FileDownload';
-import InviteCode from '../components/InviteCode';
+import FileUpload from './components/FileUpload';
+import FileDownload from './components/FileDownload';
+import InviteCode from './components/InviteCode';
 import './App.css';
 
 function App() {
