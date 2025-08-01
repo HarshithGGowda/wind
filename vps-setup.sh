@@ -35,7 +35,7 @@ sudo npm install -g pm2
 echo "Installing Maven..."
 sudo apt install -y maven
 
-Clone repository (uncomment and modify if using Git)
+#Clone repository (uncomment and modify if using Git)
 echo "Cloning repository..."
 git clone git@github.com:HarshithGGowda/wind.git
 cd wind
