@@ -1,18 +1,23 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: true,
-  swcMinify: true,
+  experimental: {
+    serverComponentsExternalPackages: [],
+  },
+  // Increase body size limit for large file uploads
   async rewrites() {
     return [
       {
-        source: '/api/upload',
-        destination: 'http://localhost:8080/upload',
-      },
-      {
-        source: '/api/download/:port',
-        destination: 'http://localhost:8080/download/:port',
+        source: '/api/:path*',
+        destination: 'http://localhost:8080/:path*',
       },
     ];
+  },
+  // Remove default body size limitations
+  api: {
+    bodyParser: {
+      sizeLimit: '500mb',
+    },
+    responseLimit: false,
   },
 }
 

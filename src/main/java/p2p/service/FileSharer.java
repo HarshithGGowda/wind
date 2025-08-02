@@ -15,7 +15,7 @@ import p2p.utils.UploadUtils;
 public class FileSharer {
 
     private HashMap<Integer, String> availableFiles;
-    private static final int BUFFER_SIZE = 64 * 1024; // 64KB buffer for streaming
+    private static final int BUFFER_SIZE = 64 * 1024;
 
     public FileSharer() {
         availableFiles = new HashMap<>();
@@ -35,30 +35,25 @@ public class FileSharer {
     public void startFileServer(int port) {
         String filePath = availableFiles.get(port);
         if (filePath == null) {
-            System.err.println("No file associated with port: " + port);
             return;
         }
 
         try (ServerSocket serverSocket = new ServerSocket(port)) {
-            serverSocket.setSoTimeout(300000); // 5 minute timeout
-            System.out.println("Serving file '" + new File(filePath).getName() + "' on port " + port);
+            serverSocket.setSoTimeout(300000);
 
             while (true) {
                 try {
                     Socket clientSocket = serverSocket.accept();
                     clientSocket.setTcpNoDelay(true);
                     clientSocket.setSendBufferSize(BUFFER_SIZE * 2);
-                    System.out.println("Client connected: " + clientSocket.getInetAddress());
 
                     new Thread(new FileSenderHandler(clientSocket, filePath)).start();
                 } catch (IOException e) {
-                    System.err.println("Error accepting client connection: " + e.getMessage());
                     break;
                 }
             }
-
         } catch (IOException e) {
-            System.err.println("Error starting file server on port " + port + ": " + e.getMessage());
+            System.err.println("Error starting file server: " + e.getMessage());
         }
     }
 
@@ -80,41 +75,31 @@ public class FileSharer {
 
             try (FileInputStream fis = new FileInputStream(file); BufferedInputStream bis = new BufferedInputStream(fis, BUFFER_SIZE); OutputStream oss = clientSocket.getOutputStream(); BufferedOutputStream bos = new BufferedOutputStream(oss, BUFFER_SIZE)) {
 
-                // Send file metadata as header
                 String header = String.format("Filename: %s\nFilesize: %d\n\n", filename, fileSize);
                 bos.write(header.getBytes());
                 bos.flush();
 
-                // Stream the file content in chunks
                 byte[] buffer = new byte[BUFFER_SIZE];
                 int bytesRead;
-                long totalSent = 0;
 
                 while ((bytesRead = bis.read(buffer)) != -1) {
                     bos.write(buffer, 0, bytesRead);
-                    totalSent += bytesRead;
-
-                    // Flush periodically for better streaming
-                    if (totalSent % (BUFFER_SIZE * 10) == 0) {
+                    if (bytesRead % (BUFFER_SIZE * 10) == 0) {
                         bos.flush();
-                        System.out.printf("Sent: %.2f%% (%d/%d bytes)\n",
-                                (totalSent * 100.0 / fileSize), totalSent, fileSize);
                     }
                 }
 
                 bos.flush();
-                System.out.println("File '" + filename + "' sent successfully to " + clientSocket.getInetAddress());
 
             } catch (IOException e) {
-                System.err.println("Error sending file to client: " + e.getMessage());
+                System.err.println("Error sending file: " + e.getMessage());
             } finally {
                 try {
                     clientSocket.close();
                 } catch (IOException e) {
-                    System.err.println("Error closing client socket: " + e.getMessage());
+                    // Ignore
                 }
             }
         }
     }
-
 }

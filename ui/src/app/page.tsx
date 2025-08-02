@@ -14,12 +14,20 @@ export default function Home() {
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [port, setPort] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<'upload' | 'download'>('upload');
+  const [uploadError, setUploadError] = useState<string>('');
 
   const handleFileUpload = async (file: File) => {
+    setUploadError('');
+    
     // Check file size (500MB limit)
     const maxSize = 500 * 1024 * 1024; // 500MB
+    console.log(`File size: ${file.size} bytes (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+    console.log(`Max size: ${maxSize} bytes (${(maxSize / 1024 / 1024).toFixed(2)} MB)`);
+    
     if (file.size > maxSize) {
-      alert('File size exceeds 500MB limit. Please choose a smaller file.');
+      const errorMsg = `File size exceeds 500MB limit. Your file is ${(file.size / 1024 / 1024).toFixed(2)}MB.`;
+      setUploadError(errorMsg);
+      alert(errorMsg);
       return;
     }
 
@@ -31,30 +39,53 @@ export default function Home() {
       const formData = new FormData();
       formData.append('file', file);
       
+      console.log('Starting upload...');
+      
       const response = await axios.post('/api/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
         timeout: 300000, // 5 minute timeout
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            console.log(`Upload progress: ${progress}%`);
             setUploadProgress(progress);
           }
         },
       });
       
+      console.log('Upload successful:', response.data);
       setPort(response.data.port);
       setUploadProgress(100);
     } catch (error: any) {
-      console.error('Error uploading file:', error);
+      console.error('Upload error details:', {
+        message: error.message,
+        code: error.code,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        config: error.config
+      });
+      
+      let errorMessage = 'Failed to upload file. Please try again.';
+      
       if (error.code === 'ECONNABORTED') {
-        alert('Upload timeout. Please try with a smaller file or check your connection.');
+        errorMessage = 'Upload timeout. Please try with a smaller file or check your connection.';
       } else if (error.response?.status === 413) {
-        alert('File too large. Please choose a smaller file.');
-      } else {
-        alert('Failed to upload file. Please try again.');
+        errorMessage = 'File too large for server. Please choose a smaller file.';
+      } else if (error.response?.status === 400) {
+        errorMessage = `Bad request: ${error.response?.data || 'Invalid file format or content'}`;
+      } else if (error.response?.status === 500) {
+        errorMessage = `Server error: ${error.response?.data || 'Internal server error'}`;
+      } else if (error.message) {
+        errorMessage = `Upload failed: ${error.message}`;
       }
+      
+      setUploadError(errorMessage);
+      alert(errorMessage);
     } finally {
       setIsUploading(false);
     }
@@ -167,7 +198,13 @@ export default function Home() {
               <div className="space-y-6">
                 <FileUpload onFileUpload={handleFileUpload} isUploading={isUploading} />
                 
-                {uploadedFile && !isUploading && (
+                {uploadError && (
+                  <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
+                    <p className="text-sm text-red-700 font-medium">{uploadError}</p>
+                  </div>
+                )}
+                
+                {uploadedFile && !isUploading && !uploadError && (
                   <div className="p-4 bg-gradient-to-r from-slate-50 to-blue-50 rounded-xl border border-slate-200/50">
                     <p className="text-sm text-slate-700">
                       Selected file: <span className="font-semibold text-slate-900">{uploadedFile.name}</span> 
