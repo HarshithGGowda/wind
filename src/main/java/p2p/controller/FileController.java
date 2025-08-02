@@ -130,8 +130,7 @@ public class FileController {
                 System.arraycopy(data, contentStart, fileContent, 0, fileContent.length);
 
                 return new ParseResult(filename, contentType, fileContent);
-            }
-            catch (Exception e) {
+            } catch (Exception e) {
                 System.err.println("Error parsing multipart data: " + e.getMessage());
                 return null;
             }
