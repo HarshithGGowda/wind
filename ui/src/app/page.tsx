@@ -10,12 +10,22 @@ export default function Home() {
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [downloadProgress, setDownloadProgress] = useState(0);
   const [port, setPort] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<'upload' | 'download'>('upload');
 
   const handleFileUpload = async (file: File) => {
+    // Check file size (500MB limit)
+    const maxSize = 500 * 1024 * 1024; // 500MB
+    if (file.size > maxSize) {
+      alert('File size exceeds 500MB limit. Please choose a smaller file.');
+      return;
+    }
+
     setUploadedFile(file);
     setIsUploading(true);
+    setUploadProgress(0);
     
     try {
       const formData = new FormData();
@@ -25,12 +35,26 @@ export default function Home() {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        timeout: 300000, // 5 minute timeout
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setUploadProgress(progress);
+          }
+        },
       });
       
       setPort(response.data.port);
-    } catch (error) {
+      setUploadProgress(100);
+    } catch (error: any) {
       console.error('Error uploading file:', error);
-      alert('Failed to upload file. Please try again.');
+      if (error.code === 'ECONNABORTED') {
+        alert('Upload timeout. Please try with a smaller file or check your connection.');
+      } else if (error.response?.status === 413) {
+        alert('File too large. Please choose a smaller file.');
+      } else {
+        alert('Failed to upload file. Please try again.');
+      }
     } finally {
       setIsUploading(false);
     }
@@ -38,23 +62,27 @@ export default function Home() {
   
   const handleDownload = async (port: number) => {
     setIsDownloading(true);
+    setDownloadProgress(0);
     
     try {
-      // Request download from Java backend
       const response = await axios.get(`/api/download/${port}`, {
         responseType: 'blob',
+        timeout: 300000, // 5 minute timeout
+        onDownloadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setDownloadProgress(progress);
+          }
+        },
       });
       
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
       
-      // Try to get filename from response headers
-      // Axios normalizes headers to lowercase, but we need to handle different cases
       const headers = response.headers;
       let contentDisposition = '';
       
-      // Look for content-disposition header regardless of case
       for (const key in headers) {
         if (key.toLowerCase() === 'content-disposition') {
           contentDisposition = headers[key];
@@ -75,9 +103,16 @@ export default function Home() {
       document.body.appendChild(link);
       link.click();
       link.remove();
-    } catch (error) {
+      window.URL.revokeObjectURL(url);
+      setDownloadProgress(100);
+      
+    } catch (error: any) {
       console.error('Error downloading file:', error);
-      alert('Failed to download file. Please check the invite code and try again.');
+      if (error.code === 'ECONNABORTED') {
+        alert('Download timeout. Please try again or check your connection.');
+      } else {
+        alert('Failed to download file. Please check the invite code and try again.');
+      }
     } finally {
       setIsDownloading(false);
     }
@@ -136,7 +171,7 @@ export default function Home() {
                   <div className="p-4 bg-gradient-to-r from-slate-50 to-blue-50 rounded-xl border border-slate-200/50">
                     <p className="text-sm text-slate-700">
                       Selected file: <span className="font-semibold text-slate-900">{uploadedFile.name}</span> 
-                      <span className="text-slate-500 ml-2">({Math.round(uploadedFile.size / 1024)} KB)</span>
+                      <span className="text-slate-500 ml-2">({(uploadedFile.size / 1024 / 1024).toFixed(2)} MB)</span>
                     </p>
                   </div>
                 )}
@@ -144,7 +179,13 @@ export default function Home() {
                 {isUploading && (
                   <div className="text-center py-8">
                     <div className="inline-block animate-spin rounded-full h-10 w-10 border-4 border-blue-500 border-t-transparent"></div>
-                    <p className="mt-4 text-slate-600 font-medium">Uploading file...</p>
+                    <p className="mt-4 text-slate-600 font-medium">Uploading file... {uploadProgress}%</p>
+                    <div className="w-full bg-gray-200 rounded-full h-2 mt-4">
+                      <div 
+                        className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
+                        style={{ width: `${uploadProgress}%` }}
+                      ></div>
+                    </div>
                   </div>
                 )}
                 
@@ -157,7 +198,13 @@ export default function Home() {
                 {isDownloading && (
                   <div className="text-center py-8">
                     <div className="inline-block animate-spin rounded-full h-10 w-10 border-4 border-blue-500 border-t-transparent"></div>
-                    <p className="mt-4 text-slate-600 font-medium">Downloading file...</p>
+                    <p className="mt-4 text-slate-600 font-medium">Downloading file... {downloadProgress}%</p>
+                    <div className="w-full bg-gray-200 rounded-full h-2 mt-4">
+                      <div 
+                        className="bg-blue-600 h-2 rounded-full transition-all duration-300" 
+                        style={{ width: `${downloadProgress}%` }}
+                      ></div>
+                    </div>
                   </div>
                 )}
               </div>
