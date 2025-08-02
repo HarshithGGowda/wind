@@ -61,7 +61,7 @@ function App() {
         <h1 className="title">
           <i className="fas fa-wind"></i> Wind
         </h1>
-        <p className="subtitle">Secure P2P File Sharing</p>
+        <p className="subtitle">End 2 End File Sharing</p>
       </header>
       
       <div className="main-content">
