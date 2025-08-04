@@ -1,23 +1,29 @@
 package p2p.controller;
 
-import p2p.service.FileSharer;
-
-import java.io.*;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
+import org.apache.commons.io.IOUtils;
 
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
-import java.net.InetSocketAddress;
-import java.net.Socket;
-
-import org.apache.commons.io.IOUtils;
+import p2p.service.FileSharer;
 
 public class FileController {
+
     private final FileSharer fileSharer;
     private final HttpServer server;
     private final String uploadDir;
@@ -53,6 +59,7 @@ public class FileController {
     }
 
     private class CORSHandler implements HttpHandler {
+
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             Headers headers = exchange.getResponseHeaders();
@@ -74,6 +81,7 @@ public class FileController {
     }
 
     private static class MultipartParser {
+
         private final byte[] data;
         private final String boundary;
 
@@ -150,6 +158,7 @@ public class FileController {
         }
 
         public static class ParseResult {
+
             public final String filename;
             public final String contentType;
             public final byte[] fileContent;
@@ -163,6 +172,7 @@ public class FileController {
     }
 
     private class UploadHandler implements HttpHandler {
+
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             Headers headers = exchange.getResponseHeaders();
@@ -208,19 +218,28 @@ public class FileController {
                     return;
                 }
 
-                String filename = result.filename;
-                if (filename == null || filename.trim().isEmpty()) {
-                    filename = "unnamed-file";
+                String originalFilename = result.filename;
+                if (originalFilename == null || originalFilename.trim().isEmpty()) {
+                    originalFilename = "unnamed-file";
                 }
 
-                String uniqueFilename = UUID.randomUUID().toString() + "_" + new File(filename).getName();
+                // Create unique filename while preserving original name and extension
+                String fileExtension = "";
+                String baseName = originalFilename;
+                int lastDotIndex = originalFilename.lastIndexOf('.');
+                if (lastDotIndex > 0 && lastDotIndex < originalFilename.length() - 1) {
+                    fileExtension = originalFilename.substring(lastDotIndex);
+                    baseName = originalFilename.substring(0, lastDotIndex);
+                }
+
+                String uniqueFilename = UUID.randomUUID().toString() + "_" + baseName + fileExtension;
                 String filePath = uploadDir + File.separator + uniqueFilename;
 
                 try (FileOutputStream fos = new FileOutputStream(filePath)) {
                     fos.write(result.fileContent);
                 }
 
-                int port = fileSharer.offerFile(filePath);
+                int port = fileSharer.offerFile(filePath, originalFilename); // Pass original filename
 
                 new Thread(() -> fileSharer.startFileServer(port)).start();
 
@@ -243,6 +262,7 @@ public class FileController {
     }
 
     private class DownloadHandler implements HttpHandler {
+
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             Headers headers = exchange.getResponseHeaders();
@@ -263,40 +283,48 @@ public class FileController {
             try {
                 int port = Integer.parseInt(portStr);
 
-                try (Socket socket = new Socket("localhost", port);
-                     InputStream socketInput = socket.getInputStream()) {
+                try (Socket socket = new Socket("localhost", port); InputStream socketInput = socket.getInputStream()) {
 
                     File tempFile = File.createTempFile("download-", ".tmp");
                     String filename = "downloaded-file"; // Default filename
 
                     try (FileOutputStream fos = new FileOutputStream(tempFile)) {
-                        byte[] buffer = new byte[4096];
-                        int bytesRead;
-
-                        ByteArrayOutputStream headerBaos = new ByteArrayOutputStream();
+                        // Read the filename header
+                        StringBuilder headerBuilder = new StringBuilder();
                         int b;
                         while ((b = socketInput.read()) != -1) {
-                            if (b == '\n') break;
-                            headerBaos.write(b);
+                            if (b == '\n') {
+                                break;
+                            }
+                            if (b != '\r') { // Skip carriage return
+                                headerBuilder.append((char) b);
+                            }
                         }
 
-                        String header = headerBaos.toString().trim();
+                        String header = headerBuilder.toString().trim();
                         if (header.startsWith("Filename: ")) {
                             filename = header.substring("Filename: ".length());
                         }
 
+                        // Read file content
+                        byte[] buffer = new byte[8192];
+                        int bytesRead;
                         while ((bytesRead = socketInput.read(buffer)) != -1) {
                             fos.write(buffer, 0, bytesRead);
                         }
                     }
 
-                    headers.add("Content-Disposition", "attachment; filename=\"" + filename + "\"");
-                    headers.add("Content-Type", "application/octet-stream");
+                    // Set proper content disposition with original filename (RFC 6266 compliant)
+                    String encodedFilename = java.net.URLEncoder.encode(filename, "UTF-8").replace("+", "%20");
+                    headers.add("Content-Disposition", "attachment; filename=\"" + filename + "\"; filename*=UTF-8''" + encodedFilename);
+
+                    // Set content type based on file extension
+                    String contentType = getContentTypeFromFilename(filename);
+                    headers.add("Content-Type", contentType);
 
                     exchange.sendResponseHeaders(200, tempFile.length());
-                    try (OutputStream os = exchange.getResponseBody();
-                         FileInputStream fis = new FileInputStream(tempFile)) {
-                        byte[] buffer = new byte[4096];
+                    try (OutputStream os = exchange.getResponseBody(); FileInputStream fis = new FileInputStream(tempFile)) {
+                        byte[] buffer = new byte[8192];
                         int bytesRead;
                         while ((bytesRead = fis.read(buffer)) != -1) {
                             os.write(buffer, 0, bytesRead);
@@ -321,6 +349,66 @@ public class FileController {
                 try (OutputStream os = exchange.getResponseBody()) {
                     os.write(response.getBytes());
                 }
+            }
+        }
+
+        private String getContentTypeFromFilename(String filename) {
+            if (filename == null) {
+                return "application/octet-stream";
+            }
+
+            String extension = "";
+            int lastDotIndex = filename.lastIndexOf('.');
+            if (lastDotIndex > 0 && lastDotIndex < filename.length() - 1) {
+                extension = filename.substring(lastDotIndex + 1).toLowerCase();
+            }
+
+            switch (extension) {
+                case "pdf":
+                    return "application/pdf";
+                case "txt":
+                    return "text/plain";
+                case "doc":
+                    return "application/msword";
+                case "docx":
+                    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+                case "xls":
+                    return "application/vnd.ms-excel";
+                case "xlsx":
+                    return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                case "ppt":
+                    return "application/vnd.ms-powerpoint";
+                case "pptx":
+                    return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+                case "jpg":
+                case "jpeg":
+                    return "image/jpeg";
+                case "png":
+                    return "image/png";
+                case "gif":
+                    return "image/gif";
+                case "zip":
+                    return "application/zip";
+                case "rar":
+                    return "application/x-rar-compressed";
+                case "mp3":
+                    return "audio/mpeg";
+                case "mp4":
+                    return "video/mp4";
+                case "avi":
+                    return "video/x-msvideo";
+                case "json":
+                    return "application/json";
+                case "xml":
+                    return "application/xml";
+                case "html":
+                    return "text/html";
+                case "css":
+                    return "text/css";
+                case "js":
+                    return "application/javascript";
+                default:
+                    return "application/octet-stream";
             }
         }
     }
