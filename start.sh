@@ -4,14 +4,14 @@
 echo "Building Java backend..."
 mvn clean package
 
-# Start the Java backend in the background
-echo "Starting Java backend..."
-java -jar target/p2p-1.0-SNAPSHOT.jar &
+# Start the Java backend in the background with optimized memory settings for 2GB instance
+echo "Starting Java backend with optimized memory settings..."
+java -Xmx1536m -Xms512m -XX:+UseG1GC -jar target/p2p-1.0-SNAPSHOT.jar &
 BACKEND_PID=$!
 
 # Wait for the backend to start
 echo "Waiting for backend to start..."
-sleep 3
+sleep 5
 
 # Install frontend dependencies if node_modules doesn't exist
 if [ ! -d "ui/node_modules" ]; then
@@ -21,7 +21,7 @@ fi
 
 # Start the frontend
 echo "Starting frontend..."
-cd ui && npm run dev
+cd ui && npm start
 
 # When the frontend is stopped, also stop the backend
 echo "Stopping backend (PID: $BACKEND_PID)..."

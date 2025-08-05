@@ -1,5 +1,7 @@
 package p2p.service;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -125,21 +127,48 @@ public class FileSharer {
 
         @Override
         public void run() {
-            try (FileInputStream fis = new FileInputStream(filePath); OutputStream oss = clientSocket.getOutputStream()) {
+            try {
+                // Set socket options for large file transfers
+                clientSocket.setSoTimeout(600000); // 10 minutes timeout
+                clientSocket.setSendBufferSize(1024 * 1024); // 1MB send buffer
+                clientSocket.setTcpNoDelay(false); // Enable Nagle's algorithm for large transfers
+
+                FileInputStream fis = new FileInputStream(filePath);
+                BufferedInputStream bis = new BufferedInputStream(fis, 1024 * 1024); // 1MB buffer
+                OutputStream oss = clientSocket.getOutputStream();
+                BufferedOutputStream bos = new BufferedOutputStream(oss, 1024 * 1024); // 1MB buffer
 
                 // Send the original filename as a header
                 String header = "Filename: " + originalFilename + "\n";
-                oss.write(header.getBytes("UTF-8"));
-                oss.flush();
+                bos.write(header.getBytes("UTF-8"));
+                bos.flush();
 
-                // Send the file content
-                byte[] buffer = new byte[8192]; // Increased buffer size
+                // Send the file content with larger buffer for large files
+                byte[] buffer = new byte[1024 * 1024]; // 1MB buffer
                 int bytesRead;
-                while ((bytesRead = fis.read(buffer)) != -1) {
-                    oss.write(buffer, 0, bytesRead);
+                long totalBytesSent = 0;
+
+                while ((bytesRead = bis.read(buffer)) != -1) {
+                    bos.write(buffer, 0, bytesRead);
+                    totalBytesSent += bytesRead;
+
+                    // Flush every 10MB to prevent memory buildup
+                    if (totalBytesSent % (10 * 1024 * 1024) == 0) {
+                        bos.flush();
+                    }
+
+                    // Optional: Log progress for very large files
+                    if (totalBytesSent % (50 * 1024 * 1024) == 0) { // Every 50MB
+                        System.out.println("Sent " + (totalBytesSent / (1024 * 1024)) + "MB of '" + originalFilename + "'...");
+                    }
                 }
-                oss.flush();
-                System.out.println("File '" + originalFilename + "' sent to " + clientSocket.getInetAddress());
+                bos.flush();
+                System.out.println("File '" + originalFilename + "' (" + (totalBytesSent / (1024 * 1024)) + "MB) sent to " + clientSocket.getInetAddress());
+
+                bis.close();
+                fis.close();
+                bos.close();
+                oss.close();
 
             } catch (IOException e) {
                 System.err.println("Error sending file to client: " + e.getMessage());

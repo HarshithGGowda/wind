@@ -2,11 +2,11 @@
 echo Building Java backend...
 call mvn clean package
 
-echo Starting Java backend...
-start /b java -jar target\p2p-1.0-SNAPSHOT.jar
+echo Starting Java backend with optimized memory settings...
+start /b java -Xmx1536m -Xms512m -XX:+UseG1GC -jar target\p2p-1.0-SNAPSHOT.jar
 
 echo Waiting for backend to start...
-timeout /t 3
+timeout /t 5
 
 echo Checking if node_modules exists...
 if not exist ui\node_modules (
@@ -15,7 +15,7 @@ if not exist ui\node_modules (
 )
 
 echo Starting frontend...
-cd ui && npm run dev
+cd ui && npm start
 
 echo Stopping backend...
 taskkill /f /im java.exe

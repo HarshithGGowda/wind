@@ -15,20 +15,47 @@ function App() {
     setUploadedFile(file);
     setIsUploading(true);
     
+    // Check file size (500MB limit)
+    const maxSize = 500 * 1024 * 1024; // 500MB in bytes
+    if (file.size > maxSize) {
+      alert('File size exceeds 500MB limit. Please choose a smaller file.');
+      setIsUploading(false);
+      setUploadedFile(null);
+      return;
+    }
+    
     try {
+      const xhr = new XMLHttpRequest();
       const formData = new FormData();
       formData.append('file', file);
       
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
+      xhr.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable) {
+          const percentComplete = (event.loaded / event.total) * 100;
+          console.log(`Upload progress: ${percentComplete.toFixed(1)}%`);
+          // You could add a progress bar here
+        }
       });
       
-      const data = await response.json();
-      setPort(data.port);
+      xhr.onload = function() {
+        if (xhr.status === 200) {
+          const data = JSON.parse(xhr.responseText);
+          setPort(data.port);
+        } else {
+          throw new Error(`HTTP error! status: ${xhr.status}`);
+        }
+      };
+      
+      xhr.onerror = function() {
+        throw new Error('Network error occurred');
+      };
+      
+      xhr.open('POST', '/api/upload');
+      xhr.send(formData);
     } catch (error) {
       console.error('Error uploading file:', error);
       alert('Failed to upload file. Please try again.');
+      setUploadedFile(null);
     } finally {
       setIsUploading(false);
     }
@@ -46,30 +73,45 @@ function App() {
       
       const blob = await response.blob();
       
-      // Extract filename from Content-Disposition header
+      // Extract filename from Content-Disposition header - FIXED
       const contentDisposition = response.headers.get('Content-Disposition');
       let filename = 'downloaded-file';
       
       if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        // Try filename* first (RFC 6266)
+        let filenameMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/);
         if (filenameMatch && filenameMatch[1]) {
-          filename = filenameMatch[1].replace(/['"]/g, '');
+          filename = decodeURIComponent(filenameMatch[1]);
+        } else {
+          // Fallback to regular filename
+          filenameMatch = contentDisposition.match(/filename="([^"]+)"/);
+          if (filenameMatch && filenameMatch[1]) {
+            filename = filenameMatch[1];
+          }
         }
       }
       
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', filename); // Use extracted filename
+      link.setAttribute('download', filename);
       document.body.appendChild(link);
       link.click();
       link.remove();
-      window.URL.revokeObjectURL(url); // Clean up memory
+      window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Error downloading file:', error);
       alert('Failed to download file. Please check the invite code and try again.');
     } finally {
       setIsDownloading(false);
+    }
+  };
+
+  const formatFileSize = (bytes) => {
+    if (bytes >= 1024 * 1024) {
+      return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    } else {
+      return `${Math.round(bytes / 1024)} KB`;
     }
   };
 
@@ -105,7 +147,7 @@ function App() {
             {uploadedFile && !isUploading && (
               <div className="file-info">
                 <p>
-                  <i className="fas fa-file"></i> Selected file: <strong>{uploadedFile.name}</strong> ({Math.round(uploadedFile.size / 1024)} KB)
+                  <i className="fas fa-file"></i> Selected file: <strong>{uploadedFile.name}</strong> ({formatFileSize(uploadedFile.size)})
                 </p>
               </div>
             )}

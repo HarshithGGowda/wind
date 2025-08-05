@@ -1,5 +1,7 @@
 package p2p.controller;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -44,7 +46,12 @@ public class FileController {
         server.createContext("/download", new DownloadHandler());
         server.createContext("/", new CORSHandler());
 
+        // Increase executor thread pool and timeout for large files
         server.setExecutor(executorService);
+
+        // Set system properties for large file handling
+        System.setProperty("sun.net.httpserver.maxReqTime", "600"); // 10 minutes
+        System.setProperty("sun.net.httpserver.maxRspTime", "600"); // 10 minutes
     }
 
     public void start() {
@@ -54,7 +61,16 @@ public class FileController {
 
     public void stop() {
         server.stop(0);
+        fileSharer.shutdown(); // Add this line
         executorService.shutdown();
+        try {
+            if (!executorService.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                executorService.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executorService.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
         System.out.println("API server stopped");
     }
 
@@ -283,12 +299,19 @@ public class FileController {
             try {
                 int port = Integer.parseInt(portStr);
 
-                try (Socket socket = new Socket("localhost", port); InputStream socketInput = socket.getInputStream()) {
+                try (Socket socket = new Socket()) {
+                    // Set socket timeout for large files (10 minutes)
+                    socket.setSoTimeout(600000);
+                    socket.setReceiveBufferSize(1024 * 1024); // 1MB receive buffer
+                    socket.connect(new java.net.InetSocketAddress("localhost", port), 30000);
+
+                    InputStream socketInput = socket.getInputStream();
 
                     File tempFile = File.createTempFile("download-", ".tmp");
                     String filename = "downloaded-file"; // Default filename
 
-                    try (FileOutputStream fos = new FileOutputStream(tempFile)) {
+                    try (FileOutputStream fos = new FileOutputStream(tempFile); BufferedOutputStream bos = new BufferedOutputStream(fos, 1024 * 1024)) { // 1MB buffer
+
                         // Read the filename header
                         StringBuilder headerBuilder = new StringBuilder();
                         int b;
@@ -306,12 +329,22 @@ public class FileController {
                             filename = header.substring("Filename: ".length());
                         }
 
-                        // Read file content
-                        byte[] buffer = new byte[8192];
+                        // Read file content with larger buffer for large files
+                        byte[] buffer = new byte[1024 * 1024]; // 1MB buffer
                         int bytesRead;
+                        long totalBytesRead = 0;
+
                         while ((bytesRead = socketInput.read(buffer)) != -1) {
-                            fos.write(buffer, 0, bytesRead);
+                            bos.write(buffer, 0, bytesRead);
+                            totalBytesRead += bytesRead;
+
+                            // Optional: Log progress for very large files
+                            if (totalBytesRead % (50 * 1024 * 1024) == 0) { // Every 50MB
+                                System.out.println("Downloaded " + (totalBytesRead / (1024 * 1024)) + "MB...");
+                            }
                         }
+                        bos.flush();
+                        System.out.println("Total downloaded: " + (totalBytesRead / (1024 * 1024)) + "MB");
                     }
 
                     // Set proper content disposition with original filename (RFC 6266 compliant)
@@ -323,10 +356,11 @@ public class FileController {
                     headers.add("Content-Type", contentType);
 
                     exchange.sendResponseHeaders(200, tempFile.length());
-                    try (OutputStream os = exchange.getResponseBody(); FileInputStream fis = new FileInputStream(tempFile)) {
-                        byte[] buffer = new byte[8192];
+                    try (OutputStream os = exchange.getResponseBody(); FileInputStream fis = new FileInputStream(tempFile); BufferedInputStream bis = new BufferedInputStream(fis, 1024 * 1024)) { // 1MB buffer
+
+                        byte[] buffer = new byte[1024 * 1024]; // 1MB buffer
                         int bytesRead;
-                        while ((bytesRead = fis.read(buffer)) != -1) {
+                        while ((bytesRead = bis.read(buffer)) != -1) {
                             os.write(buffer, 0, bytesRead);
                         }
                     }
